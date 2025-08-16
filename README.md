@@ -1,4 +1,4 @@
-## Design (Day 3)
+## Design 
 
 ### Problem
 Give data analysts a helper that can read a CSV, answer plain-English questions, run basic analysis, and produce tables/plots—without writing code by hand.
