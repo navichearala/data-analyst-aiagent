@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+# Use headless backend for CI/tests (safe to leave enabled)
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
@@ -14,11 +18,15 @@ MAX_CELLS_DEFAULT = 2_000_000  # rows * cols
 MAX_PREVIEW_ROWS = 50
 MAX_GROUP_ROWS = 1_000
 MAX_PLOT_POINTS = 2_000
+
 ARTIFACTS_DIR = Path("artifacts")
+PLOTS_DIR = ARTIFACTS_DIR / "plots"
 
 
 def _ensure_artifacts_dir() -> None:
+    """Make sure artifacts/ and artifacts/plots/ exist."""
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # -------------------------
@@ -110,8 +118,7 @@ def filter_df(df: pd.DataFrame, expr: str) -> pd.DataFrame:
     """
     try:
         return df.query(expr, engine="python")
-    except Exception as err:
-        # keep original cause for debuggability
+    except Exception as err:  # keep original cause for debuggability
         raise ValueError(f"Invalid filter expression: {expr}") from err
 
 
@@ -133,6 +140,9 @@ def groupby_agg(df: pd.DataFrame, by: list[str], metrics: dict[str, str]) -> pd.
     return grouped
 
 
+# -------------------------
+# Visualization tool (Day 6)
+# -------------------------
 def plot(
     df: pd.DataFrame,
     kind: str,
@@ -143,7 +153,7 @@ def plot(
     filename: str | None = None,
 ) -> Path:
     """
-    Create a simple chart and save it into artifacts/.
+    Create a simple chart and save it into artifacts/plots/.
     kind: 'line' | 'bar' | 'hist' | 'scatter'
     Caps points to keep charts readable & fast.
     """
@@ -151,15 +161,13 @@ def plot(
 
     if x not in df.columns:
         raise ValueError(f"Missing x column: {x}")
-    if y is not None and y not in df.columns and kind in {"line", "bar", "scatter"}:
-        raise ValueError(f"Missing y column: {y}")
+    if kind in {"line", "bar", "scatter"} and (y is None or y not in df.columns):
+        raise ValueError(f"{kind} requires a valid y column")
     if hue is not None and hue not in df.columns:
         raise ValueError(f"Missing hue column: {hue}")
 
     # downsample for readability
-    sample = df
-    if kind in {"line", "scatter"} and len(df) > MAX_PLOT_POINTS:
-        sample = df.sample(MAX_PLOT_POINTS, random_state=42)
+    sample = df if len(df) <= MAX_PLOT_POINTS else df.sample(MAX_PLOT_POINTS, random_state=42)
 
     fig, ax = plt.subplots()
 
@@ -175,13 +183,10 @@ def plot(
             small = sample.groupby([x, hue])[y].sum().unstack(fill_value=0)
             small.plot(kind="bar", ax=ax)
         else:
-            small = sample.groupby(x)[y].sum()
-            small.plot(kind="bar", ax=ax)
+            sample.groupby(x)[y].sum().plot(kind="bar", ax=ax)
     elif kind == "hist":
         ax.hist(sample[x].dropna())
     elif kind == "scatter":
-        if y is None:
-            raise ValueError("scatter requires y")
         if hue:
             for k, part in sample.groupby(hue):
                 ax.scatter(part[x], part[y], label=str(k))
@@ -198,9 +203,9 @@ def plot(
     if title:
         ax.set_title(title)
 
-    # save
+    # save to artifacts/plots
     name = filename or f"{kind}_{x}{'_' + y if y else ''}.png"
-    out = ARTIFACTS_DIR / name
+    out = PLOTS_DIR / name
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     return out
